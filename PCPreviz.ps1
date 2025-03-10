@@ -257,6 +257,21 @@ foreach ($Disk in $StorageInfo) {
     Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
 }
 
+foreach ($Disk in $StorageInfo) {
+    if ($Disk.Model -and $Disk.Model -ne "") {
+        Write-Host "`n" -NoNewline
+        Write-Host "Would you like to Google the model $($Disk.Model) on SmartHDD.com? (Y/N): " -NoNewline -ForegroundColor White
+        $response = Read-Host
+        if ($response -match "^[Yy]$") {
+            Add-Type -AssemblyName System.Net
+            $searchQuery = [System.Net.WebUtility]::UrlEncode("site:smarthdd.com $($Disk.Model)")
+            Start-Process -FilePath "https://www.google.com/search?q=$searchQuery"
+            Write-Host "Searching Google for: site:smarthdd.com $($Disk.Model)" -ForegroundColor Green
+        } else {
+            Write-Host "Skipping Google search for: $($Disk.Model)" -ForegroundColor Yellow
+        }
+    }
+}
 # Problems Check
 # Function to translate ConfigManagerErrorCode to a readable description
 function Get-ErrorDescription {
@@ -305,6 +320,9 @@ Write-Host "$($elapsedTime.TotalSeconds) seconds" -ForegroundColor Cyan
 Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
 Write-Host "Would you like to generate a battery report? (Y/N): " -NoNewline -ForegroundColor White
 $batteryResponse = Read-Host
+if (-not $batteryResponse) {
+    $batteryResponse = "N"
+}
 if ($batteryResponse -match "^[Yy]$") {
     Write-Host "Generating battery report..." -ForegroundColor Yellow
     $reportPath = "C:\battery-report.html"
@@ -348,6 +366,10 @@ try {
 Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
 $settingsResponse = Read-Host
 
+if (-not $settingsResponse) {
+    $settingsResponse = "Y"
+}
+
 if ($settingsResponse -match "^[Yy]$") {
     Write-Host "Opening settings..." -ForegroundColor Yellow
     # Open printer settings
@@ -364,31 +386,46 @@ if (!$isAdmin) {
         if ($rebootResponse -match "^[Yy]$") {
             Write-Host "Rebooting into BIOS..." -ForegroundColor Green
             try {
-                # Try using shutdown.exe directly
-                shutdown.exe /r /fw /t 0
-                Start-Sleep 2 # Wait for shutdown to initiate
-            } catch [Exception] {
-                Write-Host "Failed to reboot using shutdown.exe: $($_.Exception.GetType().FullName)" -ForegroundColor Red
-                Write-Host "Error details: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host "Trying alternative method..." -ForegroundColor Yellow
+                $osVersion = [System.Version]((Get-WmiObject -Class Win32_OperatingSystem).Version)
+            }
+            catch {
+                Write-Host "Failed to retrieve OS version: $_" -ForegroundColor Red
+                exit 1
+            }
+            
+            # Check Firmware Reboot Compatibility
+            $supportsFwReboot = $osVersion.Major -gt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -ge 2)
+            
+            if ($supportsFwReboot) {
                 try {
-                    # Alternative method using WMI
-                    $computer = Get-WmiObject -Class Win32_OperatingSystem
-                    $computer.Win32Shutdown(6)
-                } catch [Exception] {
-                    Write-Host "Failed to reboot using WMI: $($_.Exception.GetType().FullName)" -ForegroundColor Red
-                    Write-Host "Error details: $($_.Exception.Message)" -ForegroundColor Red
-                    Write-Host "Both reboot methods failed. Please restart manually and enter BIOS." -ForegroundColor Red
+                    Write-Host "Initiating firmware reboot..." -ForegroundColor Cyan
+                    Write-Warning "The system will reboot in 10 seconds. Save any open work immediately!"
+                    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -NoExit -File ""./reboot.ps1""" -Verb RunAs
+
+                    # Start shutdown process
+                    $shutdownArgs = "/r /fw /t 10 /c `"PS Firmware Reboot initiated by $env:USERNAME`""
+                    Start-Process "shutdown.exe" -ArgumentList $shutdownArgs -NoNewWindow -Wait
+                    
+                    exit 0
+                }
+                catch {
+                    Write-Host "Failed to initiate firmware reboot: $_" -ForegroundColor Red
+                    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -NoExit -File ""./reboot.ps1""" -Verb RunAs
+                    exit 2
                 }
             }
-        } else {
-            Write-Host "Skipping BIOS reboot." -ForegroundColor Yellow
+            else {
+                Write-Host "Automatic firmware reboot not supported on:" -ForegroundColor Yellow
+                Write-Host "OS Version: $($osVersion.Major).$($osVersion.Minor) (Windows 7/Server 2008 R2 or older)" -ForegroundColor Yellow
+            }
         }
     }
 }
 
+# Get OS Version Information
+
 # Reset Execution Policy
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Default -Force
 Start-Sleep -Seconds 2
-
+pause
 exit
