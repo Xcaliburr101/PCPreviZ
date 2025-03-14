@@ -343,19 +343,7 @@ if ($batteryResponse -match "^[Yy]$") {
 
 Write-Host "----------------------------------------" -ForegroundColor DarkGray
 
-# Ask about opening settings
-Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
-$settingsResponse = Read-Host
 
-if (-not $settingsResponse) {
-    $settingsResponse = "Y"
-}
-
-if ($settingsResponse -match "^[Yy]$") {
-    Write-Host "Opening settings..." -ForegroundColor Yellow
-    # Open printer settings
-    Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
-}
 
 #automatic add printers
 Write-Host "`n==================== Printer Discovery =====================" -ForegroundColor Cyan
@@ -375,6 +363,21 @@ try {
     }
 } catch {
     Write-Host "Error discovering printers: $_" -ForegroundColor Red
+}
+
+
+# Ask about opening settings
+Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
+$settingsResponse = Read-Host
+
+if (-not $settingsResponse) {
+    $settingsResponse = "Y"
+}
+
+if ($settingsResponse -match "^[Yy]$") {
+    Write-Host "Opening settings..." -ForegroundColor Yellow
+    # Open printer settings
+    Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
 }
 
 if (!$isAdmin) {
