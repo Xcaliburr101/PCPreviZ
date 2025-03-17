@@ -276,7 +276,6 @@ foreach ($Disk in $StorageInfo) {
     }
 }
 # Problems Check
-# Function to translate ConfigManagerErrorCode to a readable description
 function Get-ErrorDescription {
     param ($errorCode)
     switch ($errorCode) {
@@ -302,7 +301,7 @@ $problematicDevices = $devices | Where-Object {
 write-host "==================Problems==============================" -ForegroundColor Cyan
 # Display the problematic devices
 if ($problematicDevices) {
-    Write-Host "Devices with driver issues (excluding disabled devices):" -ForegroundColor Yellow
+    Write-warning "Devices with driver issues (excluding disabled devices):"
     $problematicDevices | ForEach-Object {
         Write-Host "Device: " -NoNewline -ForegroundColor White; Write-Host $($_.Name) -ForegroundColor Yellow
         Write-Host "Error Code: " -NoNewline -ForegroundColor White; Write-Host $($_.ConfigManagerErrorCode) -ForegroundColor Yellow
@@ -392,20 +391,20 @@ if (!$isAdmin) {
                 $shutdownArgs = "/r /fw /t 10 /c `"PS Firmware Reboot initiated by $env:USERNAME`""
                 Start-Process "shutdown.exe" -ArgumentList $shutdownArgs -NoNewWindow -Wait
             } catch {
-                Write-Host "$_" -ForegroundColor Red
+                Write-Warning "Failed with shutdown.exe method: $_" 
             }
             try{
 
 # Check if the Restart-Computer cmdlet supports the -Firmware parameter (PowerShell v5.1+)
 if ($PSVersionTable.PSVersion.Major -ge 5 -and $PSVersionTable.PSVersion.Minor -ge 1) {
-    Write-Host "Attempting to reboot into firmware mode using Restart-Computer -Firmware..."
+    Write-Host "reboot into firmware mode using Restart-Computer -Firmware..." -ForegroundColor DarkYellow
     try {
         Restart-Computer -Firmware -Force
-        Write-Host "Successfully initiated firmware reboot using Restart-Computer -Firmware."
+        Write-Host "Successfully initiated firmware reboot using Restart-Computer -Firmware." -ForegroundColor Green
     }
     catch {
         Write-Warning "Failed to initiate firmware reboot using Restart-Computer -Firmware: $($_.Exception.Message)"
-        Write-Host "Falling back to the registry method..."
+        Write-Host "Falling back to the registry method..." -ForegroundColor Red
         $fallbackSuccessful = $false
         try {
             # Set the registry key to trigger firmware boot on the next restart
@@ -420,23 +419,23 @@ if ($PSVersionTable.PSVersion.Major -ge 5 -and $PSVersionTable.PSVersion.Minor -
             Write-Verbose "Setting registry value '$registryPath\$registryKeyName' to 1"
             Set-ItemProperty -Path $registryPath -Name $registryKeyName -Value 1 -Force
 
-            Write-Host "Successfully set the registry key for firmware reboot."
-            Write-Host "Initiating system reboot..."
+            Write-Host "Successfully set the registry key for firmware reboot." -ForegroundColor Green
+            Write-Host "Initiating system reboot..." -ForegroundColor Green
             Restart-Computer -Force
             $fallbackSuccessful = $true
         }
         catch {
             Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
-            Write-Error "Could not initiate a reboot into firmware mode. Please consult your system's manual for alternative methods."
+            Write-Error "Could not initiate a reboot into firmware mode. im an dumbdumb"
         }
         if ($fallbackSuccessful) {
-            Write-Host "System will now reboot and should enter firmware mode."
+            Write-Host "System will now reboot and should enter firmware mode." -ForegroundColor Cyan
         } else {
             Write-Warning "Fallback method also failed. Unable to guarantee reboot into firmware mode."
         }
     }
 } else {
-    Write-Host "Older PowerShell version detected. Falling back to the registry method for firmware reboot..."
+    Write-Host "Older PowerShell version detected. Falling back to the registry method for firmware reboot..." -ForegroundColor Cyan
     $fallbackSuccessful = $false
     try {
         # Set the registry key to trigger firmware boot on the next restart
@@ -451,23 +450,23 @@ if ($PSVersionTable.PSVersion.Major -ge 5 -and $PSVersionTable.PSVersion.Minor -
         Write-Verbose "Setting registry value '$registryPath\$registryKeyName' to 1"
         Set-ItemProperty -Path $registryPath -Name $registryKeyName -Value 1 -Force
 
-        Write-Host "Successfully set the registry key for firmware reboot."
-        Write-Host "Initiating system reboot..."
+        Write-Host "Successfully set the registry key for firmware reboot." -ForegroundColor Green
+        Write-Host "Initiating system reboot..." -ForegroundColor Cyan
         Restart-Computer -Force
         $fallbackSuccessful = $true
     }
     catch {
         Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
-        Write-Error "Could not initiate a reboot into firmware mode. Please consult your system's manual for alternative methods."
+        Write-Error "Could not initiate a reboot into firmware mode. Im a DumbDumb."
     }
     if ($fallbackSuccessful) {
-        Write-Host "System will now reboot and should enter firmware mode."
+        Write-Host "System will now reboot and should enter firmware mode." -ForegroundColor DarkGreen
     } else {
         Write-Warning "Fallback method failed. Unable to guarantee reboot into firmware mode."
     }
 }
             } catch{
-                Write-host "$_"
+                Write-host "i fuckedup: $_"
             }
         }
     }
