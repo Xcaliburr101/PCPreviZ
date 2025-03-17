@@ -276,6 +276,7 @@ foreach ($Disk in $StorageInfo) {
     }
 }
 # Problems Check
+# Function to translate ConfigManagerErrorCode to a readable description
 function Get-ErrorDescription {
     param ($errorCode)
     switch ($errorCode) {
@@ -301,7 +302,6 @@ $problematicDevices = $devices | Where-Object {
 write-host "==================Problems==============================" -ForegroundColor Cyan
 # Display the problematic devices
 if ($problematicDevices) {
-    Write-warning "Devices with driver issues (excluding disabled devices):"
     $problematicDevices | ForEach-Object {
         Write-Host "Device: " -NoNewline -ForegroundColor White; Write-Host $($_.Name) -ForegroundColor Yellow
         Write-Host "Error Code: " -NoNewline -ForegroundColor White; Write-Host $($_.ConfigManagerErrorCode) -ForegroundColor Yellow
@@ -342,8 +342,20 @@ if ($batteryResponse -match "^[Yy]$") {
 
 Write-Host "----------------------------------------" -ForegroundColor DarkGray
 
+# Ask about opening settings
+Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
+$settingsResponse = Read-Host
 
+if (-not $settingsResponse) {
+    $settingsResponse = "Y"
+}
 
+if ($settingsResponse -match "^[Yy]$") {
+    Write-Host "Opening settings..." -ForegroundColor Yellow
+    # Open printer settings
+    Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
+}
+8
 #automatic add printers
 Write-Host "`n==================== Printer Discovery =====================" -ForegroundColor Cyan
 Write-Host "Searching for available printers..." -ForegroundColor Yellow
@@ -365,20 +377,8 @@ try {
 }
 
 
-# Ask about opening settings
-Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
-$settingsResponse = Read-Host
 
-if (-not $settingsResponse) {
-    $settingsResponse = "Y"
-}
-
-if ($settingsResponse -match "^[Yy]$") {
-    Write-Host "Opening settings..." -ForegroundColor Yellow
-    # Open printer settings
-    Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
-}
-
+# Check for admin rights and ask if the user wants to reboot into BIOS, but ONLY if Secure Boot is disabled
 if (!$isAdmin) {
     Write-Host "`nAdmin rights required to check Secure Boot and reboot to BIOS" -ForegroundColor Red
 } else {
@@ -388,90 +388,42 @@ if (!$isAdmin) {
         if ($rebootResponse -match "^[Yy]$") {
             Write-Host "Rebooting into BIOS..." -ForegroundColor Green
             try {
-                $shutdownArgs = "/r /fw /t 10 /c `"PS Firmware Reboot initiated by $env:USERNAME`""
-                Start-Process "shutdown.exe" -ArgumentList $shutdownArgs -NoNewWindow -Wait
-            } catch {
-                Write-Warning "Failed with shutdown.exe method: $_" 
+                $osVersion = [System.Version]((Get-WmiObject -Class Win32_OperatingSystem).Version)
             }
-            try{
-
-# Check if the Restart-Computer cmdlet supports the -Firmware parameter (PowerShell v5.1+)
-if ($PSVersionTable.PSVersion.Major -ge 5 -and $PSVersionTable.PSVersion.Minor -ge 1) {
-    Write-Host "reboot into firmware mode using Restart-Computer -Firmware..." -ForegroundColor DarkYellow
-    try {
-        Restart-Computer -Firmware -Force
-        Write-Host "Successfully initiated firmware reboot using Restart-Computer -Firmware." -ForegroundColor Green
-    }
-    catch {
-        Write-Warning "Failed to initiate firmware reboot using Restart-Computer -Firmware: $($_.Exception.Message)"
-        Write-Host "Falling back to the registry method..." -ForegroundColor Red
-        $fallbackSuccessful = $false
-        try {
-            # Set the registry key to trigger firmware boot on the next restart
-            $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\FirmwareEnvironment"
-            $registryKeyName = "BootToFirmware"
-
-            if (-not (Test-Path $registryPath)) {
-                Write-Verbose "Creating registry path: '$registryPath'"
-                New-Item -Path $registryPath -Force | Out-Null
+            catch {
+                Write-Host "Failed to retrieve OS version: $_" -ForegroundColor Red
+                exit 1
             }
-
-            Write-Verbose "Setting registry value '$registryPath\$registryKeyName' to 1"
-            Set-ItemProperty -Path $registryPath -Name $registryKeyName -Value 1 -Force
-
-            Write-Host "Successfully set the registry key for firmware reboot." -ForegroundColor Green
-            Write-Host "Initiating system reboot..." -ForegroundColor Green
-            Restart-Computer -Force
-            $fallbackSuccessful = $true
-        }
-        catch {
-            Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
-            Write-Error "Could not initiate a reboot into firmware mode. im an dumbdumb"
-        }
-        if ($fallbackSuccessful) {
-            Write-Host "System will now reboot and should enter firmware mode." -ForegroundColor Cyan
-        } else {
-            Write-Warning "Fallback method also failed. Unable to guarantee reboot into firmware mode."
-        }
-    }
-} else {
-    Write-Host "Older PowerShell version detected. Falling back to the registry method for firmware reboot..." -ForegroundColor Cyan
-    $fallbackSuccessful = $false
-    try {
-        # Set the registry key to trigger firmware boot on the next restart
-        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\FirmwareEnvironment"
-        $registryKeyName = "BootToFirmware"
-
-        if (-not (Test-Path $registryPath)) {
-            Write-Verbose "Creating registry path: '$registryPath'"
-            New-Item -Path $registryPath -Force | Out-Null
-        }
-
-        Write-Verbose "Setting registry value '$registryPath\$registryKeyName' to 1"
-        Set-ItemProperty -Path $registryPath -Name $registryKeyName -Value 1 -Force
-
-        Write-Host "Successfully set the registry key for firmware reboot." -ForegroundColor Green
-        Write-Host "Initiating system reboot..." -ForegroundColor Cyan
-        Restart-Computer -Force
-        $fallbackSuccessful = $true
-    }
-    catch {
-        Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
-        Write-Error "Could not initiate a reboot into firmware mode. Im a DumbDumb."
-    }
-    if ($fallbackSuccessful) {
-        Write-Host "System will now reboot and should enter firmware mode." -ForegroundColor DarkGreen
-    } else {
-        Write-Warning "Fallback method failed. Unable to guarantee reboot into firmware mode."
-    }
-}
-            } catch{
-                Write-host "i fuckedup: $_"
+            
+            # Check Firmware Reboot Compatibility
+            $supportsFwReboot = $osVersion.Major -gt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -ge 2)
+            
+            if ($supportsFwReboot) {
+                try {
+                    Write-Host "Initiating firmware reboot..." -ForegroundColor Cyan
+                    Write-Warning "The system will reboot in 10 seconds. Save any open work immediately!"
+                   
+                    # Start shutdown process
+                     Start-Process "shutdown.exe" -ArgumentList $shutdownArgs -NoNewWindow -Wait
+                     Start-Sleep 2
+                    exit 0
+                }
+                catch {
+                    Write-Host "Failed to initiate firmware reboot: $_" -ForegroundColor Red
+                    Start-Sleep 2
+                    exit 2
+                }
+            }
+            else {
+                Write-Host "Automatic firmware reboot not supported on:" -ForegroundColor Yellow
+                Write-Host "OS Version: $($osVersion.Major).$($osVersion.Minor) (Windows 7/Server 2008 R2 or older)" -ForegroundColor Yellow
+                Start-Sleep 2
             }
         }
     }
 }
-    
+
+# Get OS Version Information
 
 # Reset Execution Policy
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Default -Force
