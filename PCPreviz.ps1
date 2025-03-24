@@ -366,8 +366,8 @@ if ($Printer) {
 }
 
 Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
-$InfoAlertPercent = "100"
-$WarnAlertPercent = "70"
+$InfoAlertPercent = "80"
+$WarnAlertPercent = "50"
 $CritAlertPercent = "40"
 $BatteryHealth=""
 & powercfg /batteryreport /XML /OUTPUT "batteryreport.xml"
@@ -401,6 +401,143 @@ Remove-Item "batteryreport.xml"
 
 $stopWatch.Stop()
 $elapsedTime = [math]::Round($stopWatch.Elapsed.TotalSeconds)
+
+$laptopModel = (Get-CimInstance -ClassName Win32_ComputerSystem).Model
+# Get the laptop brand
+$laptopBrand = (Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer
+# Get the laptop model number - this might need adjustment based on your system's data
+$laptopModelNumber = (Get-CimInstance -ClassName Win32_ComputerSystem).SystemSKUNumber
+if (-not $laptopModelNumber) {
+    $laptopModelNumber = $laptopModel # Fallback to model if SKU is not available
+}
+
+
+# XML File Path - assuming it's in the same directory as the script
+$xmlFilePath = "C:\Users\vanyordi\Documents\GitHub\PCPreviz\Laptop_info.xml"
+
+# Performance Monitor - Adjusted to update XML
+try {
+    [xml]$xml = Get-Content $xmlFilePath -ErrorAction Stop
+
+    # Find existing Laptop node
+    $laptopNode = $xml.Laptops.Laptop | Where-Object {
+        $_.Brand -eq $laptopBrand -and $_.Model -eq $laptopModel -and $_.ModelNumber -eq $laptopModelNumber
+    }
+
+    # Extract Processor Name using regex
+    if ($info.Processor -match "^(.*?)\@") {
+        $processorName = $Matches[1].Trim() # Trim any leading/trailing whitespace
+    } else {
+        $processorName = $info.Processor # Fallback to the full string if no '@'
+    }
+
+    # --- Extract CPU Generation (Attempt 1) ---
+    $systemInfo = @{} # Initialize $systemInfo as a hashtable
+    $cpuGeneration = "Unknown" # Initialize to Unknown
+    if ($info.Processor -match "i[3579]-(\d)[\d\w-]*") {
+        $cpuGenerationNumber = $Matches[1]
+        $cpuGeneration = "$($cpuGenerationNumber)th Gen"
+    }
+    $systemInfo.CPUGeneration = $cpuGeneration
+
+    # --- Fallback: Extract entire CPU model if generation failed ---
+    if ($systemInfo.CPUGeneration -eq "Unknown") {
+        if ($info.Processor -match "(i[3579]-\w[\d\w-]*)") {
+            $systemInfo.CPUGeneration = $Matches[1]
+        }
+    }
+    # --- End of CPU Generation Extraction ---
+
+
+    if ($laptopNode) {
+        Write-Host "Matching laptop entry found. Updating existing entry." -ForegroundColor Green
+
+        # Ensure ElapsedTime node exists
+        if (-not $laptopNode.ElapsedTime) {
+            $elapsedTimeNode = $xml.CreateElement("ElapsedTime")
+            $laptopNode.AppendChild($elapsedTimeNode)
+        } else {
+            $elapsedTimeNode = $laptopNode.ElapsedTime
+        }
+
+        # Create new Time element and append it
+        $timeElement = $xml.CreateElement("Time")
+        $timeElement.InnerText = $elapsedTime
+        $elapsedTimeNode.AppendChild($timeElement)
+
+
+        # Ensure System node exists
+        if (-not $laptopNode.System) {
+            $systemNode = $xml.CreateElement("System")
+            $laptopNode.AppendChild($systemNode)
+        } else {
+            $systemNode = $laptopNode.System
+        }
+
+        # Create new Battery element and append it
+        $batteryElement = $xml.CreateElement("Battery")
+        $batteryElement.InnerText = $BatteryHealth
+        $systemNode.AppendChild($batteryElement)
+
+        # Create new Proccesor element and append it
+        $processorElement = $xml.CreateElement("Proccesor")
+        $processorElement.InnerText = $processorName # Using the extracted processor name
+        $systemNode.AppendChild($processorElement)
+
+        # Create new Gen element and append it
+        $genElement = $xml.CreateElement("Gen")
+        $genElement.InnerText = $($systemInfo.CPUGeneration)
+        $systemNode.AppendChild($genElement)
+
+
+    } else {
+        Write-Host "No matching laptop entry found. Creating new entry." -ForegroundColor Green
+
+        # Create new Laptop node
+        $newLaptopNode = $xml.CreateElement("Laptop")
+        $newLaptopNode.SetAttribute("Brand", $laptopBrand)
+        $newLaptopNode.SetAttribute("Model", $laptopModel)
+        $newLaptopNode.SetAttribute("ModelNumber", $laptopModelNumber)
+
+        # Create ElapsedTime node and Time element
+        $elapsedTimeNode = $xml.CreateElement("ElapsedTime")
+        $timeElement = $xml.CreateElement("Time")
+        $timeElement.InnerText = $elapsedTime
+        $elapsedTimeNode.AppendChild($timeElement)
+        $newLaptopNode.AppendChild($elapsedTimeNode)
+
+        # Create System node and Battery element
+        $systemNode = $xml.CreateElement("System")
+        $batteryElement = $xml.CreateElement("Battery")
+        $batteryElement.InnerText = $BatteryHealth
+        $systemNode.AppendChild($batteryElement)
+        $newLaptopNode.AppendChild($systemNode)
+
+        # Create new Proccesor element and append it
+        $processorElement = $xml.CreateElement("Proccesor")
+        $processorElement.InnerText = $processorName # Using the extracted processor name
+        $systemNode.AppendChild($processorElement)
+
+        # Create new Gen element and append it
+        $genElement = $xml.CreateElement("Gen")
+        $genElement.InnerText = $($systemInfo.CPUGeneration)
+        $systemNode.AppendChild($genElement)
+
+
+        # Append new Laptop node to Laptops root node
+        $xml.Laptops.AppendChild($newLaptopNode)
+    }
+
+
+    # Save the updated XML
+    $xml.Save($xmlFilePath) # Use Save method on the XML document object
+
+    Write-Host "XML data saved to: $xmlFilePath" -ForegroundColor Green
+
+}
+catch {
+    Write-Error "Error processing XML file: $_"
+}
 
 Write-Host "Script took $elapsedTime seconds"
 
@@ -457,6 +594,20 @@ if (!(Confirm-SecureBootUEFI)) {
         }
     }
 
+
+
+
+
+# Get the laptop model
+#$laptopModel = (Get-CimInstance -ClassName Win32_ComputerSystem).Model
+# Get the CPU information
+#$cpuName = (Get-CimInstance -ClassName Win32_Processor).Name
+# Extract the CPU generation
+#if ($cpuName -match "i[3579]-(\d+)[\w-]*") {
+#    $cpuGeneration = $Matches[1].Substring(0, 1) + "th Gen"
+#} else {
+#    $cpuGeneration = "Unknown"
+#}
 
 # Reset Execution Policy
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Default -Force
