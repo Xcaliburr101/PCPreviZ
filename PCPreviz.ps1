@@ -40,7 +40,7 @@ if (-not $isAdmin) {
 }
 
 # Start the timer
-$startTime = Get-Date
+$stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 # Display System Information first (since this is important basic info)
 Write-Host "`n================== System Information ===================" -ForegroundColor Cyan
@@ -277,7 +277,9 @@ foreach ($Disk in $StorageInfo) {
     if ($Disk.Model -and $Disk.Model -ne "") {
         Write-Host "`n" -NoNewline
         Write-Host "Would you like to Google the model $($Disk.Model) on SmartHDD.com? (Y/N): " -NoNewline -ForegroundColor White
+        $stopWatch.Stop()
         $response = Read-Host
+        $stopWatch.Start()
         if ($response -match "^[Yy]$") {
             Add-Type -AssemblyName System.Net
             $searchQuery = [System.Net.WebUtility]::UrlEncode("site:smarthdd.com $($Disk.Model)")
@@ -328,9 +330,6 @@ if ($problematicDevices) {
 #time check
 write-host ""
 write-host ""
-$elapsedTime = (Get-Date) - $startTime
-Write-Host "$($elapsedTime.TotalSeconds) seconds" -ForegroundColor Cyan
-
 #automatic add printers
 if ($Printer) {
     Write-Host "`n==================== Printer Discovery =====================" -ForegroundColor Cyan
@@ -367,8 +366,8 @@ if ($Printer) {
 }
 
 Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
-$InfoAlertPercent = "80"
-$WarnAlertPercent = "60"
+$InfoAlertPercent = "100"
+$WarnAlertPercent = "70"
 $CritAlertPercent = "40"
 $BatteryHealth=""
 & powercfg /batteryreport /XML /OUTPUT "batteryreport.xml"
@@ -384,7 +383,6 @@ $b.BatteryReport.Batteries |
             CycleCount = $_.Battery.CycleCount
             Id = $_.Battery.id
         }
-
 if (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -gt $InfoAlertPercent){
             $BatteryHealth="Great"
             write-host "Battery Health is $BatteryHealth. No further action needed." -ForegroundColor Green
@@ -399,6 +397,13 @@ if (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 
             write-host "Battery Health is $BatteryHealth. Needs replacement!" -ForegroundColor DarkRed
         }
     }
+Remove-Item "batteryreport.xml"
+
+$stopWatch.Stop()
+$elapsedTime = [math]::Round($stopWatch.Elapsed.TotalSeconds)
+
+Write-Host "Script took $elapsedTime seconds"
+
 
 if (!(Confirm-SecureBootUEFI)) {
         Write-Host "`nWould you like to reboot into BIOS now? [default: Y]" -ForegroundColor Cyan
