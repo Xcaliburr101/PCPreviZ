@@ -1,4 +1,17 @@
-# Clear the screen
+<#
+.SYNOPSIS
+    Performs a pre-visualization check on a PC, gathering system information and performing various checks.
+.DESCRIPTION
+    This script gathers hardware and software information from the local computer.
+    It displays system specs, audio and webcam status, storage details, and checks for device problems.
+    Optionally, it can generate a battery report and discover installed printers.
+.PARAMETER Printer
+    Switch parameter to include printer discovery in the script execution.
+#>
+param (
+    [switch]$Printer
+)
+
 Clear-Host
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -318,112 +331,127 @@ write-host ""
 $elapsedTime = (Get-Date) - $startTime
 Write-Host "$($elapsedTime.TotalSeconds) seconds" -ForegroundColor Cyan
 
-# Generate battery report
-Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
-Write-Host "Would you like to generate a battery report? (Y/N): " -NoNewline -ForegroundColor White
-$batteryResponse = Read-Host
-if (-not $batteryResponse) {
-    $batteryResponse = "N"
-}
-if ($batteryResponse -match "^[Yy]$") {
-    Write-Host "Generating battery report..." -ForegroundColor Yellow
-    $reportPath = "C:\battery-report.html"
-    powercfg /batteryreport /output $reportPath
-    if (Test-Path $reportPath) {
-        Write-Host "Battery report generated successfully at: $reportPath" -ForegroundColor Green
-        # Open the report in default browser
-        Start-Process $reportPath
-    } else {
-        Write-Host "Battery report file not found after generation" -ForegroundColor Red
-    }
-} else {
-    Write-Host "Skipping battery report generation" -ForegroundColor Yellow
-}
-
-Write-Host "----------------------------------------" -ForegroundColor DarkGray
-
-# Ask about opening settings
-Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
-$settingsResponse = Read-Host
-
-if (-not $settingsResponse) {
-    $settingsResponse = "Y"
-}
-
-if ($settingsResponse -match "^[Yy]$") {
-    Write-Host "Opening settings..." -ForegroundColor Yellow
-    # Open printer settings
-    Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
-}
-8
 #automatic add printers
-Write-Host "`n==================== Printer Discovery =====================" -ForegroundColor Cyan
-Write-Host "Searching for available printers..." -ForegroundColor Yellow
+if ($Printer) {
+    Write-Host "`n==================== Printer Discovery =====================" -ForegroundColor Cyan
+    Write-Host "Searching for available printers..." -ForegroundColor Yellow
 
-try {
-    Add-Type -AssemblyName System.Printing
-    $printServer = New-Object System.Printing.PrintServer
-    $printers = $printServer.GetPrintQueues()
-    if ($printers) {
-        Write-Host "`nInstalled printers found:" -ForegroundColor Green
-        foreach ($printer in $printers) {
-            Write-Host "  - $($printer.Name) (Network: $($printer.IsNetworkPrinter), Shared: $($printer.IsShared))" -ForegroundColor White
+    try {
+        Add-Type -AssemblyName System.Printing
+        $printServer = New-Object System.Printing.PrintServer
+        $printers = $printServer.GetPrintQueues()
+        if ($printers) {
+            Write-Host "`nInstalled printers found:" -ForegroundColor Green
+            foreach ($printer in $printers) {
+                Write-Host "  - $($printer.Name) (Network: $($printer.IsNetworkPrinter), Shared: $($printer.IsShared))" -ForegroundColor White
+            }
+        } else {
+            Write-Host "`nNo printers found." -ForegroundColor Green
         }
-    } else {
-        Write-Host "`nNo printers found." -ForegroundColor Green
+    } catch {
+        Write-Host "Error discovering printers: $_" -ForegroundColor Red
     }
-} catch {
-    Write-Host "Error discovering printers: $_" -ForegroundColor Red
+    # Ask about opening settings
+    Write-Host "`nWould you like to open Printers? (Y/N): " -NoNewline -ForegroundColor White
+    $settingsResponse = Read-Host
+
+    if (-not $settingsResponse) {
+        $settingsResponse = "Y"
+    }
+
+    if ($settingsResponse -match "^[Yy]$") {
+        Write-Host "Opening settings..." -ForegroundColor Yellow
+        # Open printer settings
+        Start-Process "cmd" -ArgumentList "/c start /min explorer.exe ms-settings:printers"
+    }
 }
 
+Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
+$InfoAlertPercent = "80"
+$WarnAlertPercent = "60"
+$CritAlertPercent = "40"
+$BatteryHealth=""
+& powercfg /batteryreport /XML /OUTPUT "batteryreport.xml"
+Start-Sleep 1
+[xml]$b = Get-Content batteryreport.xml
 
+$b.BatteryReport.Batteries |
+    ForEach-Object{
+        [PSCustomObject]@{
+            DesignCapacity = $_.Battery.DesignCapacity
+            FullChargeCapacity = $_.Battery.FullChargeCapacity
+            BatteryHealth = [math]::floor([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity*100)
+            CycleCount = $_.Battery.CycleCount
+            Id = $_.Battery.id
+        }
 
-# Check for admin rights and ask if the user wants to reboot into BIOS, but ONLY if Secure Boot is disabled
-if (!$isAdmin) {
-    Write-Host "`nAdmin rights required to check Secure Boot and reboot to BIOS" -ForegroundColor Red
-} else {
-    if (!(Confirm-SecureBootUEFI)) {
-        Write-Host "`nWould you like to reboot into BIOS now? (Y/N)" -ForegroundColor Cyan
+if (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -gt $InfoAlertPercent){
+            $BatteryHealth="Great"
+            write-host "Battery Health is $BatteryHealth. No further action needed." -ForegroundColor Green
+        }elseif (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -and ([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -gt $WarnAlertPercent){
+            $BatteryHealth="OK"
+            write-host "Battery Health is $BatteryHealth. Needs 3 Hour test." -ForegroundColor Yellow
+        }elseif (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -and ([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -gt $CritAlertPercent){
+            $BatteryHealth="Low"
+            write-host "Battery Health is $BatteryHealth. Needs 3 hour test, watch it closely!" -ForegroundColor Red
+        }elseif (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 -le $CritAlertPercent){
+            $BatteryHealth="Critical"
+            write-host "Battery Health is $BatteryHealth. Needs replacement!" -ForegroundColor DarkRed
+        }
+    }
+
+if (!(Confirm-SecureBootUEFI)) {
+        Write-Host "`nWould you like to reboot into BIOS now? [default: Y]" -ForegroundColor Cyan
         $rebootResponse = Read-Host
-        if ($rebootResponse -match "^[Yy]$") {
-            Write-Host "Rebooting into BIOS..." -ForegroundColor Green
+        if ($rebootResponse -match "^[Yy]|^$") {
             try {
-                $osVersion = [System.Version]((Get-WmiObject -Class Win32_OperatingSystem).Version)
-            }
-            catch {
-                Write-Host "Failed to retrieve OS version: $_" -ForegroundColor Red
-                exit 1
-            }
-            
-            # Check Firmware Reboot Compatibility
-            $supportsFwReboot = $osVersion.Major -gt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -ge 2)
-            
-            if ($supportsFwReboot) {
+                Write-Host "`n==================== CMD Method =====================" -ForegroundColor Cyan
+                # Simplified shutdown command to avoid potential path issues
+                shutdown.exe /r /fw /t 0 /c "Firmware Reboot initiated by $env:USERNAME"
+            } catch {
+                Write-Warning "Failed with shutdown.exe method: $_"
+            } # Check if the Restart-Computer cmdlet supports the -Firmware parameter (PowerShell v5.1+)
+            if ($PSVersionTable.PSVersion.Major -ge 5 -and $PSVersionTable.PSVersion.Minor -ge 1) {
+                Write-Host "`n==================== POWERSHELL Method =====================" -ForegroundColor Cyan
+                Write-Host "reboot into firmware mode using Restart-Computer -Firmware..." -ForegroundColor DarkYellow
                 try {
-                    Write-Host "Initiating firmware reboot..." -ForegroundColor Cyan
-                    Write-Warning "The system will reboot in 10 seconds. Save any open work immediately!"
-                   
-                    # Start shutdown process
-                     Start-Process "shutdown.exe" -ArgumentList $shutdownArgs -NoNewWindow -Wait
-                     Start-Sleep 2
-                    exit 0
+                    Restart-Computer -Firmware -Force
+                    Write-Host "Successfully initiated firmware reboot using Restart-Computer -Firmware." -ForegroundColor Green
                 }
                 catch {
-                    Write-Host "Failed to initiate firmware reboot: $_" -ForegroundColor Red
-                    Start-Sleep 2
-                    exit 2
-                }
-            }
-            else {
-                Write-Host "Automatic firmware reboot not supported on:" -ForegroundColor Yellow
-                Write-Host "OS Version: $($osVersion.Major).$($osVersion.Minor) (Windows 7/Server 2008 R2 or older)" -ForegroundColor Yellow
-                Start-Sleep 2
-            }
+                    Write-Warning "Failed to initiate firmware reboot using Restart-Computer -Firmware: $($_.Exception.Message)"
+                    Write-Host "Falling back to the registry method..." -ForegroundColor Red
+                    
+                    try {
+                        # Set the registry key to trigger firmware boot on the next restart
+                        Write-Host "`n==================== Registry Method =====================" -ForegroundColor Cyan
+                        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\FirmwareEnvironment"
+                        $registryKeyName = "BootToFirmware"
+            
+                        if (-not (Test-Path $registryPath)) {
+                            Write-Verbose "Creating registry path: '$registryPath'"
+                            New-Item -Path $registryPath -Force | Out-Null
+                        }
+            
+                        Write-Verbose "Setting registry value '$registryPath\$registryKeyName' to 1"
+                        Set-ItemProperty -Path $registryPath -Name $registryKeyName -Value 1 -Force
+            
+                        Write-Host "Successfully set the registry key for firmware reboot." -ForegroundColor Green
+                        Write-Host "Initiating system reboot..." -ForegroundColor Green
+                        Restart-Computer -Force
+                    }
+                    catch {
+                        Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
+                        Write-Error "Could not initiate a reboot into firmware mode. im an dumbdumb"
+            
+                    }
         }
     }
-}
+                    Pause
+        
+        }
+    }
 
-# Get OS Version Information
 
 # Reset Execution Policy
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Default -Force
