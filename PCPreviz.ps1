@@ -221,7 +221,6 @@ Write-Host "Webcam Device: " -NoNewline -ForegroundColor White
 Write-Host (Get-PnpDevice -Class Camera | Select-Object -ExpandProperty Name) -ForegroundColor Yellow
 
 # Storage Info
-
 Write-Host "`n============== Storage Device Information ===============" -ForegroundColor Cyan
 $DiskDrives = Get-WmiObject -Class Win32_DiskDrive | Where-Object {$_.MediaType -ne "Removable Media"}
 $PhysicalDisks = Get-PhysicalDisk -ErrorAction SilentlyContinue
@@ -375,10 +374,15 @@ Start-Sleep 1
 
 $b.BatteryReport.Batteries |
     ForEach-Object{
+        $batteryAmount = 0
+        if ($_.Battery.DesignCapacity -ne 0) {
+            $batteryAmount = [math]::floor([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity*100)
+        }
+        
         [PSCustomObject]@{
             DesignCapacity = $_.Battery.DesignCapacity
             FullChargeCapacity = $_.Battery.FullChargeCapacity
-            BatteryHealth = [math]::floor([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity*100) 
+            BatteryHealth = $batteryAmount
             CycleCount = $_.Battery.CycleCount
             Id = $_.Battery.id
         }
@@ -444,8 +448,6 @@ try {
             $systemInfo.CPUGeneration = $Matches[1]
         }
     }
-    # --- End of CPU Generation Extraction ---
-
 
     if ($laptopNode) {
         Write-Host "Matching laptop entry found. Updating existing entry." -ForegroundColor Green
@@ -474,7 +476,7 @@ try {
 
         # Create new Battery element and append it
         $batteryElement = $xml.CreateElement("Battery")
-        $batteryElement.InnerText = $BatteryAmount
+        $batteryElement.InnerText = $batteryAmount
         $systemNode.AppendChild($batteryElement)
 
     } else {
@@ -493,20 +495,35 @@ try {
         $elapsedTimeNode.AppendChild($timeElement)
         $newLaptopNode.AppendChild($elapsedTimeNode)
 
-        # Create System node and Battery element
+        # Create System node and add all system properties
         $systemNode = $xml.CreateElement("System")
+        
+        # Add CPU information
+        $cpuElement = $xml.CreateElement("CPU")
+        $cpuElement.InnerText = $processorName
+        $systemNode.AppendChild($cpuElement)
+
+        # Add CPU Generation
+        $cpuGenElement = $xml.CreateElement("CPUGeneration")
+        $cpuGenElement.InnerText = $systemInfo.CPUGeneration
+        $systemNode.AppendChild($cpuGenElement)
+
+        # Add Battery information
         $batteryElement = $xml.CreateElement("Battery")
-        $batteryElement.InnerText = $BatteryAmount
+        $batteryElement.InnerText = $batteryAmount
         $systemNode.AppendChild($batteryElement)
+
+        # Append the system node to the laptop node
         $newLaptopNode.AppendChild($systemNode)
 
         # Append new Laptop node to Laptops root node
-        $xml.Laptops.AppendChild($newLaptopNode)
+        $xml.Laptops.AppendChild($newLaptopNode) | Out-Null
+        $xml.Laptops.AppendChild($xml.CreateTextNode("`n")) | Out-Null
     }
 
 
     # Save the updated XML
-    $xml.Save($xmlFilePath) # Use Save method on the XML document object
+    $xml.Save($xmlFilePath) | Out-Null # Use Save method on the XML document object
 
     Write-Host "XML data saved to: $xmlFilePath" -ForegroundColor Green
 
@@ -569,7 +586,6 @@ if (!(Confirm-SecureBootUEFI)) {
         
         }
     }
-
 
 # Reset Execution Policy
 Remove-Item "batteryreport.xml"
