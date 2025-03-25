@@ -327,7 +327,6 @@ if ($problematicDevices) {
     Write-Host "All devices are functioning properly" -ForegroundColor Green
 }
 
-#time check
 write-host ""
 write-host ""
 #automatic add printers
@@ -379,7 +378,7 @@ $b.BatteryReport.Batteries |
         [PSCustomObject]@{
             DesignCapacity = $_.Battery.DesignCapacity
             FullChargeCapacity = $_.Battery.FullChargeCapacity
-            BatteryHealth = [math]::floor([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity*100)
+            BatteryHealth = [math]::floor([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity*100) 
             CycleCount = $_.Battery.CycleCount
             Id = $_.Battery.id
         }
@@ -397,7 +396,7 @@ if (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 
             write-host "Battery Health is $BatteryHealth. Needs replacement!" -ForegroundColor DarkRed
         }
     }
-Remove-Item "batteryreport.xml"
+
 
 $stopWatch.Stop()
 $elapsedTime = [math]::Round($stopWatch.Elapsed.TotalSeconds)
@@ -413,15 +412,14 @@ if (-not $laptopModelNumber) {
 
 
 # XML File Path - assuming it's in the same directory as the script
-$xmlFilePath = "C:\Users\vanyordi\Documents\GitHub\PCPreviz\Laptop_info.xml"
+$xmlFilePath = "\\vanyordi\mapje\Laptop_info.xml"
 
-# Performance Monitor - Adjusted to update XML
 try {
     [xml]$xml = Get-Content $xmlFilePath -ErrorAction Stop
 
     # Find existing Laptop node
     $laptopNode = $xml.Laptops.Laptop | Where-Object {
-        $_.Brand -eq $laptopBrand -and $_.Model -eq $laptopModel -and $_.ModelNumber -eq $laptopModelNumber
+        $_.Brand -eq $laptopBrand -and $_.Model -eq $laptopModel
     }
 
     # Extract Processor Name using regex
@@ -476,19 +474,8 @@ try {
 
         # Create new Battery element and append it
         $batteryElement = $xml.CreateElement("Battery")
-        $batteryElement.InnerText = $BatteryHealth
+        $batteryElement.InnerText = $BatteryAmount
         $systemNode.AppendChild($batteryElement)
-
-        # Create new Proccesor element and append it
-        $processorElement = $xml.CreateElement("Proccesor")
-        $processorElement.InnerText = $processorName # Using the extracted processor name
-        $systemNode.AppendChild($processorElement)
-
-        # Create new Gen element and append it
-        $genElement = $xml.CreateElement("Gen")
-        $genElement.InnerText = $($systemInfo.CPUGeneration)
-        $systemNode.AppendChild($genElement)
-
 
     } else {
         Write-Host "No matching laptop entry found. Creating new entry." -ForegroundColor Green
@@ -509,20 +496,9 @@ try {
         # Create System node and Battery element
         $systemNode = $xml.CreateElement("System")
         $batteryElement = $xml.CreateElement("Battery")
-        $batteryElement.InnerText = $BatteryHealth
+        $batteryElement.InnerText = $BatteryAmount
         $systemNode.AppendChild($batteryElement)
         $newLaptopNode.AppendChild($systemNode)
-
-        # Create new Proccesor element and append it
-        $processorElement = $xml.CreateElement("Proccesor")
-        $processorElement.InnerText = $processorName # Using the extracted processor name
-        $systemNode.AppendChild($processorElement)
-
-        # Create new Gen element and append it
-        $genElement = $xml.CreateElement("Gen")
-        $genElement.InnerText = $($systemInfo.CPUGeneration)
-        $systemNode.AppendChild($genElement)
-
 
         # Append new Laptop node to Laptops root node
         $xml.Laptops.AppendChild($newLaptopNode)
@@ -595,21 +571,8 @@ if (!(Confirm-SecureBootUEFI)) {
     }
 
 
-
-
-
-# Get the laptop model
-#$laptopModel = (Get-CimInstance -ClassName Win32_ComputerSystem).Model
-# Get the CPU information
-#$cpuName = (Get-CimInstance -ClassName Win32_Processor).Name
-# Extract the CPU generation
-#if ($cpuName -match "i[3579]-(\d+)[\w-]*") {
-#    $cpuGeneration = $Matches[1].Substring(0, 1) + "th Gen"
-#} else {
-#    $cpuGeneration = "Unknown"
-#}
-
 # Reset Execution Policy
+Remove-Item "batteryreport.xml"
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Default -Force
 Start-Sleep -Seconds 2
 pause
