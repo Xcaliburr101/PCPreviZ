@@ -38,6 +38,44 @@ if (-not $isAdmin) {
         Write-Host "Continuing in non-administrator mode." -ForegroundColor Yellow
     }
 }
+# Install dependencies
+try {
+    Write-Host "Installing dependencies..." -ForegroundColor Yellow
+
+    # Check if PowerShellGet is already installed
+    if (Get-Module -ListAvailable -Name PowerShellGet) {
+        Write-Host "PowerShellGet is already installed." -ForegroundColor Green
+    } else {
+        Write-Host "Installing PowerShellGet..." -ForegroundColor Yellow
+        Install-Module -Name PowerShellGet -Force -AllowClobber -ErrorAction Stop
+    }
+
+    ## Check if NuGet is already installed
+       if (Get-Module -ListAvailable -Name NuGet) {
+           Write-Host "NuGet is already installed." -ForegroundColor Green
+       } else {
+           Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Confirm:$false -ErrorAction Stop | Out-Null
+       }
+    # Check if PSWindowsUpdate is already installed
+    if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
+        Write-Host "PSWindowsUpdate is already installed." -ForegroundColor Green
+    } else {
+        Write-Host "Installing PSWindowsUpdate..." -ForegroundColor Yellow
+        Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -ErrorAction Stop
+    }
+}
+catch {
+    Write-Host "Error installing dependencies: $_" -ForegroundColor Red
+}
+
+# Check for updates and store them
+Write-Host "`nChecking for Windows Updates..." -ForegroundColor Yellow
+try {
+    $updates = start-job -scriptblock { Get-WindowsUpdate -ErrorAction Stop | Out-Null }
+}
+catch {
+    Write-Host "Error starting update check: $_" -ForegroundColor Red
+}
 
 # Start the timer
 $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -59,7 +97,7 @@ try {
 } catch {
     Write-Host "Secure Boot: needs admin rights" -ForegroundColor Red
 }
-Start-Process explorer.exe "ms-settings:windowsupdate"
+
 # Hardware Info
 function Get-SystemHardwareInfo {
     # Create a hashtable to store our results.
@@ -363,12 +401,56 @@ if ($Printer) {
     }
 }
 
+#Windows updates
+try {
+    Wait-Job -Job $updates -Timeout 60 -ErrorAction SilentlyContinue
+    $updates = Receive-Job -Job $updates -ErrorAction SilentlyContinue
+
+    if ($updates) {
+        # Filter updates based on criteria
+        $filteredUpdates = $updates | Where-Object {
+            $_.Title -notlike "*cumulatieve*" -and $_.Size -lt 20GB
+        }
+
+        if ($filteredUpdates) {
+            Write-Host "`nAvailable Windows Updates found (excluding cumulative and >20GB):" -ForegroundColor Green
+            foreach ($update in $filteredUpdates) {
+                Write-Host "  - $($update.Title) (Size: $($update.Size))" -ForegroundColor White
+            }
+
+            Write-Host "`nDo you want to open Windows Updates? (Y/N): " -NoNewline -ForegroundColor White
+            $stopWatch.Stop()
+            $wuResponse = Read-Host
+            $stopWatch.Start()
+
+            if ([string]::IsNullOrEmpty($wuResponse)) {
+                # Default to No if Enter is pressed
+                $wuResponse = "N"
+            }
+
+            if ($wuResponse -match "^[Yy]$") {
+                Write-Host "Opening Windows Updates..." -ForegroundColor Yellow
+                Start-Process "ms-settings:windowsupdate"
+            }
+        }
+        else {
+            Write-Host "`nNo applicable Windows Updates found after filtering." -ForegroundColor Green
+        }
+    }
+    else {
+        Write-Host "No updates found" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "Error retrieving or filtering updates: $_" -ForegroundColor Red
+}
+
 Write-Host "`n====================== Battery Report =======================" -ForegroundColor Cyan
 $InfoAlertPercent = "80"
 $WarnAlertPercent = "50"
 $CritAlertPercent = "40"
 $BatteryHealth=""
-& powercfg /batteryreport /XML /OUTPUT "batteryreport.xml"
+& powercfg /batteryreport /XML /OUTPUT "batteryreport.xml" > $null
 Start-Sleep 1
 [xml]$b = Get-Content batteryreport.xml
 
@@ -402,7 +484,10 @@ if (([int64]$_.Battery.FullChargeCapacity/[int64]$_.Battery.DesignCapacity)*100 
     }
 
 
+
 $stopWatch.Stop()
+
+
 $elapsedTime = [math]::Round($stopWatch.Elapsed.TotalSeconds)
 
 $laptopModel = (Get-CimInstance -ClassName Win32_ComputerSystem).Model
@@ -578,7 +663,7 @@ if (!(Confirm-SecureBootUEFI)) {
                     catch {
                         Write-Error "Failed to set the registry key for firmware reboot: $($_.Exception.Message)"
                         Write-Error "Could not initiate a reboot into firmware mode. im an dumbdumb"
-            
+
                     }
         }
     }
