@@ -38,35 +38,6 @@ if (-not $isAdmin) {
         Write-Host "Continuing in non-administrator mode." -ForegroundColor Yellow
     }
 }
-# Install dependencies
-try {
-    Write-Host "Installing dependencies..." -ForegroundColor Yellow
-
-    # Check if PowerShellGet is already installed
-    if (Get-Module -ListAvailable -Name PowerShellGet) {
-        Write-Host "PowerShellGet is already installed." -ForegroundColor Green
-    } else {
-        Write-Host "Installing PowerShellGet..." -ForegroundColor Yellow
-        Install-Module -Name PowerShellGet -Force -AllowClobber -ErrorAction Stop
-    }
-
-    ## Check if NuGet is already installed
-       if (Get-Module -ListAvailable -Name NuGet) {
-           Write-Host "NuGet is already installed." -ForegroundColor Green
-       } else {
-           Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Confirm:$false -ErrorAction Stop | Out-Null
-       }
-    # Check if PSWindowsUpdate is already installed
-    if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
-        Write-Host "PSWindowsUpdate is already installed." -ForegroundColor Green
-    } else {
-        Write-Host "Installing PSWindowsUpdate..." -ForegroundColor Yellow
-        Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -ErrorAction Stop
-    }
-}
-catch {
-    Write-Host "Error installing dependencies: $_" -ForegroundColor Red
-}
 
 # Start the timer
 $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
