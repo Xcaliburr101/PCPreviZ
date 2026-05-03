@@ -2,10 +2,6 @@
 
 **FastCheck.ps1** is a Windows PowerShell script that prints a structured hardware and system report to the console. It is aimed at anyone who wants a quick read on device identity, key components, storage headroom, battery health (on laptops), and whether Windows reports any misconfigured or failing plug-and-play devices.
 
-## Requirements
-
-- Windows with PowerShell (the script uses CIM, BitLocker cmdlets when elevated, and optional UEFI Secure Boot confirmation when elevated).
-- Run from an ordinary PowerShell window, or start PowerShell **as Administrator** when you need the checks that require elevation (see below).
 
 ## How to run
 
