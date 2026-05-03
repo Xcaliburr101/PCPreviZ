@@ -39,8 +39,6 @@ With elevation, the script can:
 
 **Important:** If BitLocker is not fully decrypted on `C:`, the script attempts to **disable BitLocker** on that volume (`Disable-BitLocker`). If you rely on full-disk encryption, review that behavior before running elevated, or run the normal (non-admin) mode if you only want a read-only style report.
 
-Administrator mode is appropriate when you intentionally want those firmware and volume checks and accept the BitLocker handling implemented in the script.
-
 ## What the report covers (summary)
 
 | Area | Typical content |
