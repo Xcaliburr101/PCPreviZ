@@ -1,6 +1,10 @@
-# PCPreviZ / FastCheck
+# FastCheck
 
-**FastCheck.ps1** is a Windows PowerShell script that prints a structured hardware and system report to the console. It is aimed at anyone who wants a quick read on device identity, key components, storage headroom, battery health (on laptops), and whether Windows reports any misconfigured or failing plug-and-play devices.
+**FastCheck** is a Windows PowerShell script that prints a structured hardware and system report to the console. It is aimed at anyone who wants a quick read on device identity, key components, storage headroom, battery health (on laptops), and whether Windows reports any misconfigured or failing plug-and-play devices.
+
+## Compatiblity
+
+This script is aimed at **Windows Powershell** not to be confused with **Powershell**. This is because a newly installed laptop can immidiatly run this script. Windows powershell is shipped with every windows installation and is currently on version **5.1**. This is the older and less sophisticated version of **Powershell 7** which is not installed by default. It will work just fine if you have powershell 7 installed, but for compatibility reasons this script is made for Windows powershell 5.1.
 
 
 ## How to run
@@ -10,9 +14,10 @@ From the repository folder:
 ```powershell
 .\FastCheck.ps1
 ```
-or precompiled binary
+or 
+Run the precompiled binary.
 
-To run with full privileges (right-click PowerShell, **Run as administrator**, then execute the same command).
+To run with full privileges (right-click EXE, **Run as administrator**, then execute the same command).
 
 ## Normal run versus run as administrator
 
@@ -29,6 +34,8 @@ With elevation, the script can:
 
 - Report **Secure Boot** status via `Confirm-SecureBootUEFI`.
 - Inspect **BitLocker** on the `C:` volume with `Get-BitLockerVolume`.
+- Inspect SSD health
+
 
 **Important:** If BitLocker is not fully decrypted on `C:`, the script attempts to **disable BitLocker** on that volume (`Disable-BitLocker`). If you rely on full-disk encryption, review that behavior before running elevated, or run the normal (non-admin) mode if you only want a read-only style report.
 
