@@ -15,7 +15,7 @@ From the repository folder:
 .\FastCheck.ps1
 ```
 or 
-Run the precompiled binary.
+Run the precompiled binary from the releases: ```FastCheck.exe``` 
 
 To run with full privileges (right-click EXE, **Run as administrator**, then execute the same command).
 
@@ -46,15 +46,20 @@ With elevation, the script can:
 | System and OS | Manufacturer, model, Windows caption and build, BIOS serial |
 | Licensing | Product key from firmware OA3 or registry fallback |
 | CPU / BIOS | Processor name, core counts, BIOS identification string |
+| CPU temperature | Highest reported thermal zone temperature (or not reported) |
 | Secure Boot / BitLocker | Only fully populated when elevated (BitLocker may trigger decryption on `C:`) |
 | Graphics | Physical GPUs matching common vendor patterns; driver version, resolution, reported VRAM |
 | Display | Approximate panel size from WMI monitor data when reported |
 | Memory | Per-DIMM capacity, speed, slot, part number |
-| Peripherals | Webcam (Camera/Image class), microphone via PnP |
-| Storage | Fixed drives: free space, total size, free percentage |
-| Network | Physical adapters (non-virtual) with link speed when available |
+| External management | Autopilot tenant/enrollment lock indicators from registry when present |
+| Storage | Local SSD inventory, health/operational status, and allocation usage |
+| Storage reliability (admin) | SSD reliability counters (temperature, power-on hours, write errors, wear) when supported |
 | Battery | Charge level; health percentage from WMI or `powercfg /batteryreport` XML if WMI is insufficient |
+| Battery voltage | Current vs design voltage check with tolerance-based warning |
+| Network test | Basic connectivity probe and roundtrip time to `www.google.com` |
 | Device health | PnP entities with configuration error codes (with short descriptions for common codes) |
+| Vendor software check | HP software detection on non-HP systems |
+| Software health | App package status, pending winget upgrades, pending Windows security/driver updates, crash dump count |
 
 ## Limitations
 
