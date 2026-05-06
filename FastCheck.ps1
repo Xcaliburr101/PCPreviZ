@@ -1,21 +1,24 @@
 <#
 .SYNOPSIS
-    A clean PowerShell script For laptop diagnostics.
+    Full System Hardware, Network, and Health Report (PowerShell 5.1 Compatible).
 .DESCRIPTION
-   placeholder
+    Fully optimized using surgical CIM queries, inline ternary logic, 
+    and a unified visual display engine.
 #>
 
-$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Clear-Host
 
-# --- Define standard colors for the report ---
-$ColorHeader = "white"    # For section titles like "System & OS"
-$ColorValue = "White"     # For the primary property/object value
-$ColorAccent = "Gray" # For secondary information
+# --- Permission Check ---
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-# --- Core Display Function ---
-function Show-Row ([string]$Label, $Value, [string]$PassColor = "White") {
-    # If Value is null or empty string, handle it here
+# --- Define standard colors ---
+$ColorHeader = "Cyan"
+$ColorKey = "White"
+$ColorValue = "Gray"
+$ColorAccent = "DarkGray"
+
+# --- Core Display Functions ---
+function Show-Row ([string]$Label, $Value, [string]$PassColor = "Gray") {
     if ([string]::IsNullOrWhiteSpace($Value)) {
         $DisplayValue = "N/A"
         $DisplayColor = "Gray"
@@ -23,8 +26,8 @@ function Show-Row ([string]$Label, $Value, [string]$PassColor = "White") {
         $DisplayValue = $Value
         $DisplayColor = $PassColor
     }
-
-    Write-Host (" {0,-18}: " -f $Label) -ForegroundColor cyan -NoNewline
+    # {0,-20} keeps everything perfectly aligned
+    Write-Host (" {0,-20}: " -f $Label) -ForegroundColor $ColorKey -NoNewline
     Write-Host $DisplayValue -ForegroundColor $DisplayColor
 }
 
@@ -36,69 +39,92 @@ function Show-Header ([string]$Title) {
 Show-Header "System & OS"
 $System = Get-CimInstance Win32_ComputerSystem -Property Manufacturer, Model
 $OS = Get-CimInstance Win32_OperatingSystem -Property Caption, BuildNumber
-$BIOS = Get-CimInstance Win32_BIOS -Property SerialNumber, Manufacturer, Name
 
-Show-Row "System" "$($System.Manufacturer) $($System.Model)" $ColorValue
-Show-Row "OS" "$($OS.Caption) (Build $($OS.BuildNumber))" $ColorAccent
-Show-Row "Serial Number" "$($BIOS.SerialNumber)" $ColorAccent
-
-# --- Licensing ---
-Show-Header "Licensing"
-# Try the Firmware key first (OA3)
+# Optimized License Check with Registry Fallback
 $licenseKey = (Get-CimInstance SoftwareLicensingService -Property OA3xOriginalProductKey).OA3xOriginalProductKey
-
-# Fallback to Registry if WMI is empty
 if ([string]::IsNullOrWhiteSpace($licenseKey)) {
-    $licenseKey = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform").BackupProductKeyDefault
+    $licenseKey = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" -ErrorAction SilentlyContinue).BackupProductKeyDefault
 }
 
-Show-Row "Windows Key" $licenseKey
+Show-Row "System" "$($System.Manufacturer) $($System.Model)" $ColorValue
+Show-Row "Windows Licence" $licenseKey $ColorAccent
+Show-Row "OS" "$($OS.Caption) (Build $($OS.BuildNumber))" $ColorAccent
 
 # --- CPU ---
 Show-Header "CPU"
 $CPU = Get-CimInstance Win32_Processor -Property Name, NumberOfCores, NumberOfLogicalProcessors | Select-Object -First 1
+
+# Temperature Check 
+$thermalZones = Get-CimInstance -Namespace "root/CIMV2" -ClassName Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue
+$maxTemp = 0
+
+foreach ($zone in $thermalZones) {
+    $currentTemp = [math]::round($zone.HighPrecisionTemperature / 100.0, 1)
+    # highest zone temp to represent the CPU package
+    if ($currentTemp -gt $maxTemp) { $maxTemp = $currentTemp }
+}
+
+# Display Results
 Show-Row "Name" "$($CPU.Name.Trim())" $ColorValue
 Show-Row "Cores" "$($CPU.NumberOfCores) (Logical: $($CPU.NumberOfLogicalProcessors))" $ColorAccent
 
+# Handle cases where temp might be 0
+if ($maxTemp -gt 0) {
+    $TempColor = if ($maxTemp -gt 85) { "Red" } elseif ($maxTemp -gt 70) { "Yellow" } else { "Green" }
+    Show-Row "Temperature" "$maxTemp °C" $TempColor
+} else {
+    Show-Row "Temperature" "Not Reported" $ColorAccent
+}
+
 # --- BIOS ---
 Show-Header "BIOS"
+$BIOS = Get-CimInstance Win32_BIOS -Property Manufacturer, Name, SerialNumber
 Show-Row "Version" "$($BIOS.Manufacturer) $($BIOS.Name)" $ColorValue
+Show-Row "Serial" "$($BIOS.SerialNumber)" $ColorAccent
 
-# --- Secure Boot Check ---
-Show-Header "Secure Boot"
-if ($isAdmin) {
-    if (Confirm-SecureBootUEFI) {
-        Show-Row "Status" "True" "Green"
+# --- Memory ---
+Show-Header "Memory"
+$MemorySticks = @(Get-CimInstance Win32_PhysicalMemory -Property MemoryType, SMBIOSMemoryType, Capacity, DeviceLocator, BankLabel, Speed, PartNumber, ConfiguredClockSpeed)
+
+if ($MemorySticks.Count -gt 0) {
+    $MemoryTypeMap = @{ 
+        "0"  = "Unknown/Onboard"; "20" = "DDR"; "21" = "DDR2"; "24" = "DDR3"; 
+        "26" = "DDR4"; "30" = "DDR5"; "34" = "DDR5" 
     }
-    else {
-        Show-Row "Status" "Not in Secure Boot" "Red"
-    }
-}
-else {
-    Show-Row "Status" "Run as admin to check secure boot" $ColorAccent
-}
 
-# --- Bitlocker Check ---
-Show-Header "Bitlocker"
-if ($isAdmin) {
-    $bitlockerVolume = Get-BitLockerVolume -MountPoint C:
+    $rawType = $MemorySticks[0].MemoryType
+    if ($rawType -eq 0 -or $null -eq $rawType) { $rawType = $MemorySticks[0].SMBIOSMemoryType }
+    
+    $mType = if ($MemoryTypeMap["$rawType"]) { $MemoryTypeMap["$rawType"] } else { "LPDDR / Onboard" }
+    Show-Row "Type" $mType $ColorValue
 
-    if ($bitlockerVolume.VolumeStatus -ne 'FullyDecrypted') {
-        if ($bitlockerVolume.VolumeStatus -eq 'DecryptionInProgress') {
-            Show-Row "Status" "Decryption is already in progress" "Yellow"
+    foreach ($Stick in $MemorySticks) {
+        $CapGB = [Math]::Round($Stick.Capacity / 1GB)
+        
+        # --- Physical Location Logic ---
+        $Locator = if ($Stick.DeviceLocator) { $Stick.DeviceLocator.Trim() } else { "Onboard" }
+        $Bank = if ($Stick.BankLabel) { $Stick.BankLabel.Trim() } else { "" }
+        
+        # Combine them
+        $LocationDisplay = if ($Bank -and $Bank -ne $Locator) { "$Locator ($Bank)" } else { $Locator }
+
+        # Speed Mismatch Check (Red if throttled)
+        $IsThrottled = $Stick.ConfiguredClockSpeed -lt $Stick.Speed
+        $SpeedColor = if ($IsThrottled) { "Red" } else { $ColorValue }
+        
+        # Display Row
+        Show-Row "Slot/Location" "$($LocationDisplay.PadRight(18)) ($CapGB GB @ $($Stick.ConfiguredClockSpeed)MHz)" $SpeedColor
+        
+        if ($IsThrottled) {
+            Show-Row "  Warning" "RAM rated for $($Stick.Speed)MHz" "Yellow"
         }
-        else {
-            Show-Row "Status" "Enabled" "Red"
-            Show-Row "Action" "Unlocking bitlocker..." "Yellow"
-            Disable-BitLocker -MountPoint "C:"
+
+        if (![string]::IsNullOrWhiteSpace($Stick.PartNumber)) {
+            Show-Row "  Part" "$($Stick.PartNumber.Trim())" $ColorAccent
         }
     }
-    else {
-        Show-Row "Status" "Not in Bitlocker" "Green"
-    }
-}
-else {
-    Show-Row "Status" "Run as admin to check bitlocker" $ColorAccent
+} else {
+    Show-Row "Status" "[!!] No physical memory data returned" "Yellow"
 }
 
 # --- Display Adapters ---
@@ -123,151 +149,161 @@ foreach ($gpu in $gpus) {
     Show-Row "  VRAM" "$vramGB GB" $ColorAccent
 }
 
-# --- Screen Size ---
-Show-Header "Screen Size"
-try {
-    $monitorParams = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBasicDisplayParams -ErrorAction Stop
-    $found = $false
-    foreach ($monitor in $monitorParams) {
-        if ($monitor.MaxHorizontalImageSize -gt 0 -and $monitor.MaxVerticalImageSize -gt 0) {
-            $hInches = $monitor.MaxHorizontalImageSize / 2.54
-            $vInches = $monitor.MaxVerticalImageSize / 2.54
-            $diagonalInches = [math]::Round([math]::Sqrt(($hInches * $hInches) + ($vInches * $vInches)), 2)
-            
-            Show-Row "Size" "$diagonalInches inches" $ColorValue
-            $found = $true
-            break
+# --- Screen ---
+Show-Header "Screen"
+$monitors = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBasicDisplayParams -ErrorAction SilentlyContinue
+if ($monitors) {
+    foreach ($monitor in $monitors) {
+        $widthCm = $monitor.MaxHorizontalImageSize
+        $heightCm = $monitor.MaxVerticalImageSize
+        if ($widthCm -gt 0 -and $heightCm -gt 0) {
+            $diagonalInches = [Math]::Round(([Math]::Sqrt([Math]::Pow($widthCm, 2) + [Math]::Pow($heightCm, 2)) / 2.54), 1)
+            Show-Row "Monitor" "$widthCm x $heightCm cm ($diagonalInches inches)" $ColorValue
         }
     }
-    if (-not $found) {
-        Show-Row "Size" "Not reported" "Red"
+} else {
+    Show-Row "Monitor" "Not Detected" "Red"
+}
+
+# --- External Management (Autopilot/MDM) ---
+Show-Header "External Management"
+$autopilotKey = "HKLM:\SOFTWARE\Microsoft\Provisioning\Diagnostics\Autopilot"
+$mdmKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MDM"
+$tenantDomain = ""
+$isLocked = 0
+
+if (Test-Path $autopilotKey) {
+    $tenantDomain = (Get-ItemProperty -Path $autopilotKey -ErrorAction SilentlyContinue).CloudAssignedTenantDomain
+}
+if (Test-Path $mdmKey) {
+    $isLocked = (Get-ItemProperty -Path $mdmKey -Name "EnrollmentLocked" -ErrorAction SilentlyContinue).EnrollmentLocked
+}
+
+if (![string]::IsNullOrWhiteSpace($tenantDomain)) {
+    Show-Row "Autopilot" "[!!] ENROLLED to: $($tenantDomain.ToUpper())" "Red"
+    if ($isLocked -eq 1) { Show-Row "Security" "[!!] Enrollment is LOCKED." "Yellow" }
+} else {
+    Show-Row "Autopilot" "[OK] No Profile Detected" "Green"
+}
+
+# --- Bitlocker ---
+Show-Header "Bitlocker"
+if ($isAdmin) {
+    $blv = Get-BitLockerVolume -MountPoint "C:" -ErrorAction SilentlyContinue
+    if ($blv) {
+        if ($blv.VolumeStatus -eq "FullyDecrypted") {
+            Show-Row "Status" "[OK] C: is fully decrypted" "Green"
+        } elseif ($blv.VolumeStatus -eq "DecryptionInProgress") {
+            Show-Row "Status" "[!!] Decryption in progress ($($blv.EncryptionPercentage)%)" "Yellow"
+        } else {
+            Show-Row "Status" "[!!] Encryption detected. Initiating decryption..." "Red"
+            Disable-BitLocker -MountPoint "C:" -ErrorAction SilentlyContinue | Out-Null
+        }
+    } else {
+         Show-Row "Status" "Not Enabled / No Volume Found" "Green"
     }
-}
-catch {
-    Show-Row "Size" "Query failed: $($_.Exception.Message)" "Red"
-}
-
-# --- Memory ---
-Show-Header "Memory"
-$Memory = Get-CimInstance Win32_PhysicalMemory -Property PartNumber, Speed, DeviceLocator, Capacity |
-    Select-Object PartNumber, Speed, DeviceLocator, @{N = 'CapacityGB'; E = { [Math]::Round($_.Capacity / 1GB) } }
-
-foreach ($Stick in $Memory) {
-    Show-Row "- Slot" "$($Stick.DeviceLocator.PadRight(10)) ($($Stick.CapacityGB) GB @ $($Stick.Speed)MHz)" $ColorValue
-    Show-Row "  Part" "$($Stick.PartNumber)" $ColorAccent
+} else {
+    Show-Row "Status" "Admin rights required for BitLocker check" $ColorAccent
 }
 
-# --- Webcam ---
-Show-Header "Webcam"
-# 1. Attempt to find devices in the 'Camera' class
-$webcam = Get-PnpDevice -Class Camera -ErrorAction SilentlyContinue | Select-Object -First 1
-# 2. Fallback: Check 'Image' class if 'Camera' is empty (Legacy/Older Drivers)
-if (-not $webcam) {
-    $webcam = Get-PnpDevice -Class Image -ErrorAction SilentlyContinue | 
-              Where-Object { $_.FriendlyName -match "Webcam|Camera|Integrated" } | 
-              Select-Object -First 1
-}
+# --- Storage ---
+Show-Header "Storage (Local SSDs)"
+$Disks = Get-PhysicalDisk | Where-Object MediaType -eq 'SSD'
 
-# 3. Extract the name safely
-$webcamName = if ($webcam) { $webcam.FriendlyName } else { $null }
+if (-not $Disks) {
+    Show-Row "Status" "No SSDs found on this system." "Yellow"
+} else {
+    foreach ($Disk in $Disks) {
+        $SizeGB = [math]::Round($Disk.Size / 1GB, 2)
+        $AllocatedGB = [math]::Round($Disk.AllocatedSize / 1GB, 2)
+        $AllocatedPct = if ($Disk.Size -gt 0) { [math]::Round(($Disk.AllocatedSize / $Disk.Size) * 100, 1) } else { 0 }
+        $UnallocatedPct = 100 - $AllocatedPct
+        $AllocColor = if ($UnallocatedPct -lt 5) { $ColorValue } else { "Red" }
 
-# 4. Display using your Show-Row function (which handles the N/A automatically)
-Show-Row "Device" $webcamName $ColorAccent
-# --- Storage (Local Disks) ---
-Show-Header "Storage (Local Disks)"
-$Disks = Get-CimInstance Win32_LogicalDisk -Property DeviceID, Size, FreeSpace, DriveType | Where-Object { $_.DriveType -eq 3 }
+        Show-Row "Drive" "$($Disk.FriendlyName)" $ColorValue
+        Show-Row "  Status" "$($Disk.OperationalStatus) | Health: $($Disk.HealthStatus) | Size: $SizeGB GB" $ColorAccent
+        Show-Row "  Allocation" "$AllocatedGB GB Allocated ($UnallocatedPct% Unallocated Raw Space)" $AllocColor
 
-foreach ($Disk in $Disks) {
-    $SizeGB = [Math]::Round($Disk.Size / 1GB, 2)
-    $FreeGB = [Math]::Round($Disk.FreeSpace / 1GB, 2)
-    $FreePct = [Math]::Round(($Disk.FreeSpace / $Disk.Size) * 100, 0)
-    
-    Show-Row "- Drive" "$($Disk.DeviceID)" $ColorValue
-    Show-Row "  Usage" ("{0} GB Free / {1} GB Total ({2}% Free)" -f $FreeGB, $SizeGB, $FreePct) $ColorAccent
-}
-
-# --- Microphone ---
-Show-Header "Microphone"
-try {
-    $microphoneFound = $false
-    $mic = Get-CimInstance -ClassName Win32_PnPEntity -Property Name, PNPClass -ErrorAction Stop |
-        Where-Object { $_.Name -match "Microphone|Mic|Microfoon" -or $_.PNPClass -eq "AudioEndpoint" } |
-        Select-Object -First 1
-        
-    if ($mic) {
-        Show-Row "Device" "$($mic.Name)" $ColorValue
-        $microphoneFound = $true
-    }
-
-    if (-not $microphoneFound) {
-        Show-Row "Device" "Not detected" "Red"
-    }
-}
-catch {
-    Show-Row "Detection" "Failed: $($_.Exception.Message)" "Red"
-}
-
-# --- Network (Physical Adapters) ---
-Show-Header "Network (Physical Adapters)"
-$Adapters = Get-CimInstance Win32_NetworkAdapter -Property PhysicalAdapter, Name, Speed |
-    Where-Object { $_.PhysicalAdapter -eq $true -and $_.Name -notlike "*Virtual*" -and $_.Name -notlike "*WAN*" -and $_.Name -notlike "*loopback*" -and $_.Name -notlike "*Bluetooth*" }
-
-foreach ($Adapter in $Adapters) {
-    if ($Adapter.Speed -gt 0) {
-        $SpeedMbps = [Math]::Round($Adapter.Speed / 1MB, 0)
-        Show-Row "- Name" "$($Adapter.Name)" $ColorValue
-        Show-Row "  Speed" "$SpeedMbps Mbps" $ColorAccent
+        if ($isAdmin) {
+            $Counter = $Disk | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
+            if ($Counter) {
+                $Temp = if ($Counter.Temperature) { "$($Counter.Temperature) C°" } else { "N/A" }
+                $PowerOnHours = if ($Counter.PowerOnHours) { $Counter.PowerOnHours } else { "N/A" }
+                $WriteErrors = if ($null -ne $Counter.WriteErrorsTotal) { $Counter.WriteErrorsTotal } else { "0" }
+                $Wear = if ($null -ne $Counter.Wear) { "$($Counter.Wear)%" } else { "N/A" }
+                Show-Row "  Metrics" "Temp: $Temp | Power On Hours: $PowerOnHours | Write Errors: $WriteErrors | Wear: $Wear" $ColorAccent
+            } else {
+                Show-Row "  Metrics" "SMART/Reliability data not supported by driver." $ColorAccent
+            }
+        }
     }
 }
 
-# --- Battery (Conditional powercfg Fallback) ---
-Show-Header "Battery"
-$Battery = Get-CimInstance Win32_Battery -Property DesignCapacity, FullChargeCapacity, DeviceID, EstimatedChargeRemaining | Select-Object -First 1
+# --- Battery & Voltage ---
+Show-Header "Battery & Voltage"
+$Battery = Get-CimInstance Win32_Battery -Property DesignCapacity, FullChargeCapacity, DeviceID, Name, EstimatedChargeRemaining, DesignVoltage | Select-Object -First 1 
 
 if ($Battery) {
     $WMIHealthPct = 0
     if ($Battery.DesignCapacity -gt 0) {
         $WMIHealthPct = [Math]::Round(($Battery.FullChargeCapacity / $Battery.DesignCapacity) * 100, 0)
     }
-
+    
     $Source = "WMI"
 
-    # Fallback to powercfg if WMI failed (0%)
+    # XML Fallback
     if ($WMIHealthPct -eq 0) {
         $TempFile = "$env:TEMP\battery-report.xml"
         powercfg /batteryreport /XML /OUTPUT "$TempFile" | Out-Null
-
         try {
             [xml]$BatteryReport = Get-Content -Path $TempFile -ErrorAction SilentlyContinue
             Remove-Item -Path $TempFile -Force -ErrorAction SilentlyContinue
-
             $XMLBattery = $BatteryReport.BatteryReport.Batteries.Battery | Select-Object -First 1
-
             if ($XMLBattery -and $XMLBattery.DesignCapacity -gt 0) {
-                $DesignCap = $XMLBattery.DesignCapacity
-                $FullChargeCap = $XMLBattery.FullChargeCapacity
-                $WMIHealthPct = [Math]::Round(($FullChargeCap / $DesignCap) * 100, 0)
+                $WMIHealthPct = [Math]::Round(($XMLBattery.FullChargeCapacity / $XMLBattery.DesignCapacity) * 100, 0)
                 $Source = "powercfg Fallback"
             }
-        }
-        catch {
-            Write-Debug "Failed to parse battery report XML"
-        }
+        } catch { }
     }
-
+    
     Show-Row "- ID" "$($Battery.DeviceID)" $ColorValue
+    Show-Row "  Name" "$($Battery.Name)" $ColorAccent
     Show-Row "  Charge" "$($Battery.EstimatedChargeRemaining)%" $ColorAccent
-
+    
     if ($WMIHealthPct -gt 0) {
         Show-Row "  Health" "$WMIHealthPct% ($Source)" "Yellow"
-    }
-    else {
+    } else {
         Show-Row "  Health" "Health data unavailable" "Red"
     }
-}
-else {
+
+    # Voltage Check
+    $bStatus = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -Property Voltage -ErrorAction SilentlyContinue
+    if ($bStatus -and $Battery.DesignVoltage) {
+        $voltage = $bStatus.Voltage / 1000
+        $designVoltage = $Battery.DesignVoltage / 1000
+        $difference = [Math]::Abs($voltage - $designVoltage)
+        $tolerance = 0.5 
+
+        if ($difference -gt $tolerance) {
+            Show-Row "  Voltage" "[!!] Deviation too high: $difference V (Design: $designVoltage V, Current: $voltage V)" "Red"
+        } else {
+            Show-Row "  Voltage" "$voltage V (Design: $designVoltage V)" "White"
+        }
+    }
+} else {
     Show-Row "Status" "No battery detected." "Red"
 }
+
+# --- Network Test ---
+Show-Header "Network Test"
+try {
+    $ping = (New-Object Net.NetworkInformation.Ping).Send("www.google.com", 2000)
+    if ($ping.Status -eq "Success") {
+        Show-Row "Connection" "Online ($($ping.RoundtripTime)ms)" "White"
+    } else {
+        Show-Row "Connection" "[!!] No Reply" "Yellow"
+    }
+} catch { Show-Row "Connection" "[!!] Error" "Red" }
 
 # --- Problems Check ---
 function Get-ErrorDescription {
@@ -275,18 +311,17 @@ function Get-ErrorDescription {
     switch ($errorCode) {
         1 { "This device is not configured correctly." }
         2 { "Windows cannot load the driver for this device." }
-        3 { "The driver for this device might be corrupted, or your system may be running low on memory or other resources." }
+        3 { "The driver for this device might be corrupted." }
         10 { "This device cannot start." }
         18 { "Reinstall the drivers for this device." }
         22 { "This device is disabled." }
         28 { "The drivers for this device are not installed." }
-        31 { "This device is not working properly because Windows cannot load the drivers required for this device." }
+        31 { "Windows cannot load the drivers required for this device." }
         default { "Unknown error." }
     }
 }
 
-Show-Header "Problematic Devices"
-# Note: Upgraded this WMI call to CIM and added the property filter
+Show-Header "Device Manager Problems"
 $devices = Get-CimInstance -ClassName Win32_PnPEntity -Property Name, ConfigManagerErrorCode
 $problematicDevices = $devices | Where-Object {
     $_.ConfigManagerErrorCode -ne 0 -and $_.ConfigManagerErrorCode -ne 22
@@ -295,15 +330,88 @@ $problematicDevices = $devices | Where-Object {
 if ($problematicDevices) {
     $problematicDevices | ForEach-Object {
         Show-Row "Device" "$($_.Name)" "Yellow"
-        Show-Row "  Error Code" "$($_.ConfigManagerErrorCode)" "Yellow"
-        Show-Row "  Description" "$(Get-ErrorDescription $_.ConfigManagerErrorCode)" "Yellow"
-        Write-Host " ----------------------------------------" -ForegroundColor DarkGray
+        Show-Row "  Error Code" "$($_.ConfigManagerErrorCode) - $(Get-ErrorDescription $_.ConfigManagerErrorCode)" "Yellow"
+        Write-Host " -------------------------------------------------" -ForegroundColor DarkGray
     }
-}
-else {
+} else {
     Show-Row "Status" "All devices are functioning properly" "Green"
 }
 
-# --- Final Pause ---
+# --- HP Software Check ---
+Show-Header "Bloatware Check"
+$manufacturer = if ($System.Manufacturer) { $System.Manufacturer } else { "Unknown" }
+
+if ($manufacturer -notmatch "\bHP\b|Hewlett-Packard|Hewlett Packard") {
+    Show-Row "Check" "$manufacturer Detected, Checking for residual HP software..." $ColorAccent
+
+    $registryPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    $hpSoftware = Get-ItemProperty -Path $registryPaths -ErrorAction SilentlyContinue |
+        Where-Object {
+            ($_.DisplayName -match "\bHP\b|Hewlett-Packard|Hewlett Packard") -or
+            ($_.Publisher -match "\bHP\b|Hewlett-Packard|Hewlett Packard")
+        } | Select-Object -ExpandProperty DisplayName -Unique | Where-Object { ![string]::IsNullOrWhiteSpace($_) }
+
+    if ($hpSoftware) {
+        Show-Row "Status" "[!!] HP software found on a non-HP system!" "Red"
+        foreach ($app in $hpSoftware) { Show-Row "  Found" $app "Yellow" }
+    } else {
+        Show-Row "Status" "No HP software found on this device." "White"
+    }
+} else {
+     Show-Row "Status" "System is an HP. Skipping HP bloatware check." "Green"
+}
+
+
+# --- Software Health Report Table ---
 Write-Host ""
-Read-Host "Press Enter to exit"
+Write-Progress -Activity "Software Check" -Status "Checking Software and winget Updates..."
+
+function Get-DumpCount {
+    $count = 0
+    $paths = @("$env:LOCALAPPDATA\CrashDumps", "$env:SystemRoot\Minidump")
+    foreach ($p in $paths) { if (Test-Path $p) { $count += (Get-ChildItem "$p\*.dmp" -ErrorAction SilentlyContinue).Count } }
+    return $count
+}
+
+$apps = @(Get-AppxPackage -ErrorAction SilentlyContinue)
+$badApps = ($apps | Where-Object { $_.Status -ne "Ok" }).Count
+
+$wingetData = @(winget upgrade --include-unknown -e --accept-source-agreements --disable-interactivity 2>$null)
+$wCount = 0
+$dash = $wingetData | Select-String -Pattern "^-{10,}" | Select-Object -First 1
+if ($dash) { 
+    for ($i = $dash.LineNumber; $i -lt $wingetData.Count; $i++) {
+        if (![string]::IsNullOrWhiteSpace($wingetData[$i])) { $wCount++ }
+    }
+}
+
+$sec = 0; $drv = 0
+try {
+    Write-Progress -Activity "Software Check" -Status " Checking Windows Updates"
+    $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+    $pending = $searcher.Search("IsInstalled=0 and IsHidden=0").Updates
+    foreach ($u in $pending) {
+        $cats = $u.Categories | Select-Object -ExpandProperty Name
+        if ($cats -match "Security") { $sec++ } elseif ($cats -match "Driver") { $drv++ }
+    }
+} catch {}
+
+$dumps = Get-DumpCount
+Write-Progress -Activity "Software Check" -Completed
+
+$Report = New-Object System.Collections.Generic.List[PSObject]
+$Report.Add([PSCustomObject]@{ Component="Windows Apps"; Status=$(if($badApps -gt 0){"[!!]"}else{"[OK]"}); Total=$apps.Count; Details=$(if($badApps -gt 0){"$badApps non-ok"}else{"All Healthy"}) })
+$Report.Add([PSCustomObject]@{ Component="Winget"; Status=$(if($wCount -gt 0){"[!!]"}else{"[OK]"}); Total=$wCount; Details="Upgrades available" })
+$Report.Add([PSCustomObject]@{ Component="Win Security"; Status=$(if($sec -gt 0){"[!!]"}else{"[OK]"}); Total=$sec; Details="Pending patches" })
+$Report.Add([PSCustomObject]@{ Component="Win Drivers"; Status=$(if($drv -gt 0){"[!!]"}else{"[OK]"}); Total=$drv; Details="Pending updates" })
+$Report.Add([PSCustomObject]@{ Component="System Health"; Status=$(if($dumps -gt 0){"[!!]"}else{"[OK]"}); Total=$dumps; Details=$(if($dumps -gt 0){"Crash dumps found!"}else{"No crashes"}) })
+
+Show-Header "System Software Report"
+$Report | Format-Table -AutoSize
+
+Write-Host ""
+pause
