@@ -414,8 +414,17 @@ function Get-DumpCount {
     return $count
 }
 
-$apps = @(Get-AppxPackage -ErrorAction SilentlyContinue)
-$badApps = ($apps | Where-Object { $_.Status -ne "Ok" }).Count
+$apps = @()
+$appxAvailable = $false
+try {
+    Import-Module Appx -ErrorAction Stop
+    $apps = @(Get-AppxPackage -ErrorAction Stop)
+    $appxAvailable = $true
+} catch {
+    # Appx unavailable on Server Core, some OEM SKUs, or restricted shells
+}
+
+$badApps = if ($appxAvailable) { ($apps | Where-Object { $_.Status -ne "Ok" }).Count } else { 0 }
 
 $wingetData = @(winget upgrade --include-unknown --accept-source-agreements --disable-interactivity 2>$null)
 $wCount = 0
@@ -441,7 +450,9 @@ $dumps = Get-DumpCount
 Write-Progress -Activity "Software Check" -Completed
 
 $Report = New-Object System.Collections.Generic.List[PSObject]
-$Report.Add([PSCustomObject]@{ Component="Windows Apps"; Status=$(if($badApps -gt 0){"[!!]"}else{"[OK]"}); Total=$apps.Count; Details=$(if($badApps -gt 0){"$badApps non-ok"}else{"All Healthy"}) })
+$appxStatus = if (-not $appxAvailable) { "[--]" } elseif ($badApps -gt 0) { "[!!]" } else { "[OK]" }
+$appxDetails = if (-not $appxAvailable) { "Appx not supported on this platform" } elseif ($badApps -gt 0) { "$badApps non-ok" } else { "All Healthy" }
+$Report.Add([PSCustomObject]@{ Component="Windows Apps"; Status=$appxStatus; Total=$apps.Count; Details=$appxDetails })
 $Report.Add([PSCustomObject]@{ Component="Winget"; Status=$(if($wCount -gt 0){"[!!]"}else{"[OK]"}); Total=$wCount; Details="Upgrades available" })
 $Report.Add([PSCustomObject]@{ Component="Win Security"; Status=$(if($sec -gt 0){"[!!]"}else{"[OK]"}); Total=$sec; Details="Pending patches" })
 $Report.Add([PSCustomObject]@{ Component="Win Drivers"; Status=$(if($drv -gt 0){"[!!]"}else{"[OK]"}); Total=$drv; Details="Pending updates" })
