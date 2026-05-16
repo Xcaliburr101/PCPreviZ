@@ -2,7 +2,7 @@
 .SYNOPSIS
     Full System Hardware, Network, and Health Report (PowerShell 5.1 Compatible).
 .DESCRIPTION
-    Fully optimized using surgical CIM queries, inline ternary logic, 
+    Fully optimized using  CIM queries, inline ternary logic, 
     and a unified visual display engine.
 #>
 
@@ -35,12 +35,16 @@ function Show-Header ([string]$Title) {
     Write-Host "`n$Title" -ForegroundColor $ColorHeader
 }
 
+# ==============================================================================
+# HARDWARE & SYSTEM CHECKS
+# ==============================================================================
+
 # --- System & OS ---
 Show-Header "System & OS"
 $System = Get-CimInstance Win32_ComputerSystem -Property Manufacturer, Model
 $OS = Get-CimInstance Win32_OperatingSystem -Property Caption, BuildNumber
 
-# Optimized License Check with Registry Fallback
+#License Check
 $licenseKey = (Get-CimInstance SoftwareLicensingService -Property OA3xOriginalProductKey).OA3xOriginalProductKey
 if ([string]::IsNullOrWhiteSpace($licenseKey)) {
     $licenseKey = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" -ErrorAction SilentlyContinue).BackupProductKeyDefault
@@ -49,6 +53,7 @@ if ([string]::IsNullOrWhiteSpace($licenseKey)) {
 Show-Row "System" "$($System.Manufacturer) $($System.Model)" $ColorValue
 Show-Row "Windows Licence" $licenseKey $ColorAccent
 Show-Row "OS" "$($OS.Caption) (Build $($OS.BuildNumber))" $ColorAccent
+Show-Row "Build" "$((Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").DisplayVersion)" $ColorAccent
 
 # --- CPU ---
 Show-Header "CPU"
@@ -59,8 +64,9 @@ $thermalZones = Get-CimInstance -Namespace "root/CIMV2" -ClassName Win32_PerfFor
 $maxTemp = 0
 
 foreach ($zone in $thermalZones) {
+    # High Precision Temperature
     $currentTemp = [math]::round($zone.HighPrecisionTemperature / 100.0, 1)
-    # highest zone temp to represent the CPU package
+    # Track the highest zone temp to represent the CPU package
     if ($currentTemp -gt $maxTemp) { $maxTemp = $currentTemp }
 }
 
@@ -68,14 +74,13 @@ foreach ($zone in $thermalZones) {
 Show-Row "Name" "$($CPU.Name.Trim())" $ColorValue
 Show-Row "Cores" "$($CPU.NumberOfCores) (Logical: $($CPU.NumberOfLogicalProcessors))" $ColorAccent
 
-# Handle cases where temp might be 0
+# Handle cases where temp might be 0 (some desktops/VMs don't report this via WMI)
 if ($maxTemp -gt 0) {
     $TempColor = if ($maxTemp -gt 85) { "Red" } elseif ($maxTemp -gt 70) { "Yellow" } else { "Green" }
     Show-Row "Temperature" "$maxTemp °C" $TempColor
 } else {
     Show-Row "Temperature" "Not Reported" $ColorAccent
 }
-
 # --- BIOS ---
 Show-Header "BIOS"
 $BIOS = Get-CimInstance Win32_BIOS -Property Manufacturer, Name, SerialNumber
@@ -380,7 +385,7 @@ function Get-DumpCount {
 $apps = @(Get-AppxPackage -ErrorAction SilentlyContinue)
 $badApps = ($apps | Where-Object { $_.Status -ne "Ok" }).Count
 
-$wingetData = @(winget upgrade --include-unknown -e --accept-source-agreements --disable-interactivity 2>$null)
+$wingetData = @(winget upgrade --include-unknown --accept-source-agreements --disable-interactivity 2>$null)
 $wCount = 0
 $dash = $wingetData | Select-String -Pattern "^-{10,}" | Select-Object -First 1
 if ($dash) { 
