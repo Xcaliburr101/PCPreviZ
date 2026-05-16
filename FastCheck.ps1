@@ -2,8 +2,8 @@
 .SYNOPSIS
     Full System Hardware, Network, and Health Report (PowerShell 5.1 Compatible).
 .DESCRIPTION
-    Fully optimized using  CIM queries, inline ternary logic, 
-    and a unified visual display engine.
+    Uses CIM queries with WMI fallback when CIM returns no data,
+    inline ternary logic, and a unified visual display engine.
 #>
 
 Clear-Host
@@ -35,17 +35,49 @@ function Show-Header ([string]$Title) {
     Write-Host "`n$Title" -ForegroundColor $ColorHeader
 }
 
+# Prefer CIM; fall back to legacy WMI when CIM returns no instances
+function Get-CimOrWmiInstance {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ClassName,
+        [string[]]$Property,
+        [string]$Namespace = 'root\cimv2',
+        [string]$Filter,
+        [switch]$First
+    )
+
+    $cimParams = @{ ClassName = $ClassName }
+    if ($Namespace -and $Namespace -notmatch '^root\\cimv2$') { $cimParams.Namespace = $Namespace }
+    if ($Property) { $cimParams.Property = $Property }
+    if ($Filter) { $cimParams.Filter = $Filter }
+
+    $instances = @()
+    try { $instances = @(Get-CimInstance @cimParams -ErrorAction Stop) } catch { }
+
+    if ($instances.Count -eq 0) {
+        $wmiParams = @{ Class = $ClassName }
+        if ($Namespace -and $Namespace -notmatch '^root\\cimv2$') { $wmiParams.Namespace = $Namespace }
+        if ($Property) { $wmiParams.Property = $Property }
+        if ($Filter) { $wmiParams.Filter = $Filter }
+        try { $instances = @(Get-WmiObject @wmiParams -ErrorAction Stop) } catch { }
+    }
+
+    if ($First) { return $instances | Select-Object -First 1 }
+    return $instances
+}
+
 # ==============================================================================
 # HARDWARE & SYSTEM CHECKS
 # ==============================================================================
 
 # --- System & OS ---
 Show-Header "System & OS"
-$System = Get-CimInstance Win32_ComputerSystem -Property Manufacturer, Model
-$OS = Get-CimInstance Win32_OperatingSystem -Property Caption, BuildNumber
+$System = Get-CimOrWmiInstance -ClassName Win32_ComputerSystem -Property Manufacturer, Model -First
+$OS = Get-CimOrWmiInstance -ClassName Win32_OperatingSystem -Property Caption, BuildNumber -First
 
 #License Check
-$licenseKey = (Get-CimInstance SoftwareLicensingService -Property OA3xOriginalProductKey).OA3xOriginalProductKey
+$licenseKey = (Get-CimOrWmiInstance -ClassName SoftwareLicensingService -Property OA3xOriginalProductKey -First).OA3xOriginalProductKey
 if ([string]::IsNullOrWhiteSpace($licenseKey)) {
     $licenseKey = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" -ErrorAction SilentlyContinue).BackupProductKeyDefault
 }
@@ -57,10 +89,10 @@ Show-Row "Build" "$((Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\Curre
 
 # --- CPU ---
 Show-Header "CPU"
-$CPU = Get-CimInstance Win32_Processor -Property Name, NumberOfCores, NumberOfLogicalProcessors | Select-Object -First 1
+$CPU = Get-CimOrWmiInstance -ClassName Win32_Processor -Property Name, NumberOfCores, NumberOfLogicalProcessors -First
 
 # Temperature Check 
-$thermalZones = Get-CimInstance -Namespace "root/CIMV2" -ClassName Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue
+$thermalZones = Get-CimOrWmiInstance -Namespace 'root\cimv2' -ClassName Win32_PerfFormattedData_Counters_ThermalZoneInformation
 $maxTemp = 0
 
 foreach ($zone in $thermalZones) {
@@ -83,13 +115,13 @@ if ($maxTemp -gt 0) {
 }
 # --- BIOS ---
 Show-Header "BIOS"
-$BIOS = Get-CimInstance Win32_BIOS -Property Manufacturer, Name, SerialNumber
+$BIOS = Get-CimOrWmiInstance -ClassName Win32_BIOS -Property Manufacturer, Name, SerialNumber -First
 Show-Row "Version" "$($BIOS.Manufacturer) $($BIOS.Name)" $ColorValue
 Show-Row "Serial" "$($BIOS.SerialNumber)" $ColorAccent
 
 # --- Memory ---
 Show-Header "Memory"
-$MemorySticks = @(Get-CimInstance Win32_PhysicalMemory -Property MemoryType, SMBIOSMemoryType, Capacity, DeviceLocator, BankLabel, Speed, PartNumber, ConfiguredClockSpeed)
+$MemorySticks = @(Get-CimOrWmiInstance -ClassName Win32_PhysicalMemory -Property MemoryType, SMBIOSMemoryType, Capacity, DeviceLocator, BankLabel, Speed, PartNumber, ConfiguredClockSpeed)
 
 if ($MemorySticks.Count -gt 0) {
     $MemoryTypeMap = @{ 
@@ -134,7 +166,7 @@ if ($MemorySticks.Count -gt 0) {
 
 # --- Display Adapters ---
 Show-Header "Display Adapters"
-$gpus = Get-CimInstance Win32_VideoController -ErrorAction Stop |
+$gpus = Get-CimOrWmiInstance -ClassName Win32_VideoController |
     Where-Object {
         $name = $_.Name -replace '\s+', ' '
         $name -match '(?i)(AMD|Radeon|Mesa|Intel|GeForce|RTX|NVIDIA|Quadro|Titan|GTX|GT|MX|Arc|Iris|UHD|HD Graphics|Radeon|RX|Vega|Navi|RDNA)' -and
@@ -156,7 +188,7 @@ foreach ($gpu in $gpus) {
 
 # --- Screen ---
 Show-Header "Screen"
-$monitors = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorBasicDisplayParams -ErrorAction SilentlyContinue
+$monitors = Get-CimOrWmiInstance -Namespace root\wmi -ClassName WmiMonitorBasicDisplayParams
 if ($monitors) {
     foreach ($monitor in $monitors) {
         $widthCm = $monitor.MaxHorizontalImageSize
@@ -246,7 +278,7 @@ if (-not $Disks) {
 
 # --- Battery & Voltage ---
 Show-Header "Battery & Voltage"
-$Battery = Get-CimInstance Win32_Battery -Property DesignCapacity, FullChargeCapacity, DeviceID, Name, EstimatedChargeRemaining, DesignVoltage | Select-Object -First 1 
+$Battery = Get-CimOrWmiInstance -ClassName Win32_Battery -Property DesignCapacity, FullChargeCapacity, DeviceID, Name, EstimatedChargeRemaining, DesignVoltage -First
 
 if ($Battery) {
     $WMIHealthPct = 0
@@ -282,7 +314,7 @@ if ($Battery) {
     }
 
     # Voltage Check
-    $bStatus = Get-CimInstance -Namespace root\wmi -ClassName BatteryStatus -Property Voltage -ErrorAction SilentlyContinue
+    $bStatus = Get-CimOrWmiInstance -Namespace root\wmi -ClassName BatteryStatus -Property Voltage -First
     if ($bStatus -and $Battery.DesignVoltage) {
         $voltage = $bStatus.Voltage / 1000
         $designVoltage = $Battery.DesignVoltage / 1000
@@ -327,7 +359,7 @@ function Get-ErrorDescription {
 }
 
 Show-Header "Device Manager Problems"
-$devices = Get-CimInstance -ClassName Win32_PnPEntity -Property Name, ConfigManagerErrorCode
+$devices = Get-CimOrWmiInstance -ClassName Win32_PnPEntity -Property Name, ConfigManagerErrorCode
 $problematicDevices = $devices | Where-Object {
     $_.ConfigManagerErrorCode -ne 0 -and $_.ConfigManagerErrorCode -ne 22
 }
